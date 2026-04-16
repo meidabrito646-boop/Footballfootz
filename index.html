@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Soccer DX Pro</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; }
+        canvas { display: block; }
+
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+
+        /* Joystick */
+        #joystick-container {
+            position: absolute; bottom: 30px; left: 30px;
+            width: 120px; height: 120px;
+            background: rgba(255, 255, 255, 0// --- BANDEIRA DO BRASIL NA ÁREA ---.15);
+            border: 3px solid rgba(255,255,255,0.6);
+            border-radius: 50%;
+            pointer-events: auto; touch-action: none;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        #joystick-knob {
+            position: absolute; top: 40px; left: 40px;
+            width: 40px; height: 40px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+        }
+
+        /* Botão de Chute */
+        #kick-button {
+            position: absolute; bottom: 40px; right: 40px;
+            width: 90px; height: 90px;
+            background: linear-gradient(#ff4444, #cc0000);
+            border: 5px solid #fff;
+            border-radius: 50%; 
+            color: white; 
+            font-weight: bold;
+            font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+            pointer-events: auto; 
+            user-select: none;
+            box-shadow: 0 8px 15px rgba(0,0,0,0.6);
+        }
+        #kick-button:active { transform: scale(0.9); }
+
+        #score-board {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            color: white; font-size: 32px; font-weight: bold;
+            text-shadow: 3px 3px 6px #000;
+            background: rgba(0,0,0,0.4);
+            padding: 8px 30px;
+            border-radius: 50px;
+        }
+
+        #goal-msg {
+            display: none; position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%);
+            color: #ffff00; font-size: 90px; font-weight: 900;
+            text-shadow: 6px 6px 10px #000;
+            animation: goalAnim 0.6s infinite alternate;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        @keyframes goalAnim { 
+            from { transform: translate(-50%, -50%) scale(0.8); opacity: 0.7; }
+            to { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="score-board">GOLS: <span id="score">0</span></div>
+    <div id="goal-msg">davfootz🇧🇷</div>
+
+    <div id="ui">
+        <div id="joystick-container"><div id="joystick-knob"></div></div>
+        <div id="kick-button">CHUTE</div>
+    </div>
+    
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1e5c2b);
+        scene.fog = new THREE.Fog(0x1e5c2b, 60, 120);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+        const renderer = new THREE.WebGLRenderer({ 
+    antialias: true,
+    powerPreference: "high-performance"
+});
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+        
+   
+        sun.position.set(20, 40, 10);
+        sun.castShadow = true;
+        scene.add(sun);
+
+        // Campo
+        const field = new THREE.Mesh(
+            new THREE.PlaneGeometry(60, 100),
+            new THREE.MeshPhongMaterial({ color: 0x3a3a3a, shininess: 2 })
+        );
+        field.rotation.x = -Math.PI / 2;
+        field.receiveShadow = true;
+        scene.add(field);
+
+        // Linhas do campo
+        const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+        const points = [new THREE.Vector3(-29, 0.1, -49), new THREE.Vector3(29, 0.1, -49),
+                        new THREE.Vector3(29, 0.1, 49), new THREE.Vector3(-29, 0.1, 49),
+                        new THREE.Vector3(-29, 0.1, -49)];
+        scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), lineMat));
+// --- ARTE FREESTYLE NO CHÃO ---
+const artGroup = new THREE.Group();
+const posBandeiraZ = -42; // Posição dentro da área
+const escala = 0.8;      // Para ajustar o tamanho
+
+// 1. O Retângulo Verde (Fundo)
+adicionarGrafismo(0, posBandeiraZ, 10 * escala, 7 * escala, 0x009b3a);
+
+// 2. O Losango Amarelo 
+// (Usamos um quadrado rotacionado em 45 graus / Math.PI / 4)
+adicionarGrafismo(0, posBandeiraZ, 5.5 * escala, 5.5 * escala, 0xffdf00, Math.PI / 4);
+
+// 3. O Círculo Azul (Centro)
+// Vamos usar a função adicionarCirculo que definimos antes
+adicionarCirculo(0, posBandeiraZ, 1.8 * escala, 0x002776);
+
+function adicionarGrafismo(x, z, largura, altura, cor, rotacao = 0) {
+    const geo = new THREE.PlaneGeometry(largura, altura);
+    const mat = new THREE.MeshPhongMaterial({ 
+        color: cor, 
+        transparent: true, 
+        opacity: 0.6, // Deixa a arte levemente transparente para mesclar com o chão
+        side: THREE.DoubleSide 
+    });
+    const desenho = new THREE.Mesh(geo, mat);
+    
+    desenho.position.set(x, 0.12, z); // Elevado 0.12 para ficar logo acima do chão
+    desenho.rotation.x = -Math.PI / 2;
+    desenho.rotation.z = rotacao;
+    artGroup.add(desenho);
+}
+
+// Exemplos de desenhos freestyle (formas geométricas e linhas)
+adicionarGrafismo(-15, 0, 5, 20, 0xff00ff, 0.5);   // Linha diagonal rosa
+adicionarGrafismo(10, 20, 8, 8, 0x00ffff, Math.PI / 4); // Diamante ciano
+adicionarGrafismo(0, -10, 15, 2, 0xffff00, -0.2); // Faixa amarela
+adicionarGrafismo(-20, -30, 10, 10, 0xff4400, 0.8); // Mancha laranja
+
+scene.add(artGroup);
+function adicionarCirculo(x, z, raio, cor) {
+    const geo = new THREE.CircleGeometry(raio, 32);
+    const mat = new THREE.MeshPhongMaterial({ color: cor, transparent: true, opacity: 0.5 });
+    const circulo = new THREE.Mesh(geo, mat);
+    circulo.position.set(x, 0.11, z);
+    circulo.rotation.x = -Math.PI / 2;
+    artGroup.add(circulo);
+}
+
+// Adicionando alguns "pingos" de arte pelo campo
+adicionarCirculo(5, 5, 3, 0xff0000);   // Círculo vermelho
+adicionarCirculo(-10, 15, 2, 0xffffff); // Círculo branco
+
+
+        // Trave
+        const goalGroup = new THREE.Group();
+        const postMat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+        const post1 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 5, 0.6), postMat);
+        const post2 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 5, 0.6), postMat);
+        const crossbar = new THREE.Mesh(new THREE.BoxGeometry(11, 0.6, 0.6), postMat);
+        post1.position.set(-5.5, 2.5, -48.5);
+        post2.position.set(5.5, 2.5, -48.5);
+        crossbar.position.set(0, 5, -48.5);
+        goalGroup.add(post1, post2, crossbar);
+        scene.add(goalGroup);
+        // Criar uma textura de "grade" usando código (ou você pode usar uma imagem .png de rede)
+const netMat = new THREE.MeshPhongMaterial({ 
+    color: 0xffffff, 
+    wireframe: true,    // Isso faz parecer uma rede de pesca/futebol
+    transparent: true, 
+    opacity: 0.5 
+});
+        // Geometria da rede (Largura: 11, Altura: 5, Profundidade: 2)
+const netGeo = new THREE.BoxGeometry(11, 5, 2);
+const netMesh = new THREE.Mesh(netGeo, netMat);
+
+// Posicionar a rede logo atrás da trave (Z = -49.5 para ficar recuada)
+netMesh.position.set(0, 2.5, -49.5);
+goalGroup.add(netMesh);
+
+        // Linha A: Criar o material das barreiras
+const fenceMat = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
+
+// Linha B: Criar as formas (Laterais: 1x2x100 | Fundo: 60x2x1)
+const sideFenceGeo = new THREE.BoxGeometry(1, 2, 100);
+const backFenceGeo = new THREE.BoxGeometry(60, 2, 1);
+// Linha C: Barreira Esquerda e Direita
+const fenceL = new THREE.Mesh(sideFenceGeo, fenceMat); fenceL.position.set(-30, 1, 0);
+const fenceR = new THREE.Mesh(sideFenceGeo, fenceMat); fenceR.position.set(30, 1, 0);
+
+// Linha D: Barreira Fundo e Frente
+const fenceB = new THREE.Mesh(backFenceGeo, fenceMat); fenceB.position.set(0, 1, -50);
+const fenceF = new THREE.Mesh(backFenceGeo, fenceMat); fenceF.position.set(0, 1, 50);
+
+// Linha E: Adicionar tudo ao jogo
+scene.add(fenceL, fenceR, fenceB, fenceF);
+
+        // ====================== JOGADOR COM BRAÇOS ======================
+        const player = new THREE.Group();
+
+        const bodyMat = new THREE.MeshPhongMaterial({ color: 0x000000 });
+        const skinMat = new THREE.MeshPhongMaterial({ color: 0xffdbac });
+        const shortsMat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+
+        // Corpo
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.4, 0.6), bodyMat);
+        body.position.y = 1.55;
+        body.castShadow = true;
+       function adicionarNumeroCosta(objetoPai) {
+    const numMat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+    const numGroup = new THREE.Group();
+
+    // Criando um "1" simples (vertical)
+    const um = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 0.1), numMat);
+    um.position.set(-0.2, 0, 0.31); // 0.31 para ficar colado nas costas
+
+    // Criando um "0" simples (quadrado vazado ou bloco)
+    const zero = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.1), numMat);
+    zero.position.set(0.2, 0, 0.31);
+
+    numGroup.add(um, zero);
+    objetoPai.add(numGroup);
+}
+
+        // Cabeça
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.45), skinMat);
+        head.position.y = 2.75;
+
+        // Pernas
+        const legGeo = new THREE.BoxGeometry(0.35, 1.1, 0.35);
+        const lLeg = new THREE.Mesh(legGeo, shortsMat);
+        const rLeg = new THREE.Mesh(legGeo, shortsMat);
+        lLeg.position.set(-0.35, 0.75, 0);
+        rLeg.position.set(0.35, 0.75, 0);
+        lLeg.castShadow = rLeg.castShadow = true;
+
+        // Braços (novos!)
+        const armGeo = new THREE.BoxGeometry(0.28, 1.0, 0.28);
+        const lArm = new THREE.Mesh(armGeo, skinMat);
+        const rArm = new THREE.Mesh(armGeo, skinMat);
+        lArm.position.set(-0.75, 1.9, 0);
+        rArm.position.set(0.75, 1.9, 0);
+        lArm.castShadow = rArm.castShadow = true;
+
+        player.add(body, head, lLeg, rLeg, lArm, rArm);
+        player.position.set(0, 0, 10);
+        scene.add(player);
+       // Criando o grupo do goleiro
+const goalkeeper = new THREE.Group();
+const keeperMat = new THREE.MeshPhongMaterial({ color: 0xffffff }); // Camisa amarela
+const gloveMat = new THREE.MeshPhongMaterial({ color: 0x000000 }); // Luvas pretas
+
+// Corpo do Goleiro
+const kBody = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.4, 0.6), keeperMat);
+kBody.position.y = 1.55;
+const kHead = new THREE.Mesh(new THREE.SphereGeometry(0.45), skinMat);
+kHead.position.y = 2.75;
+
+// Braços (abertos para defesa)
+const kArmL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.0, 0.28), skinMat);
+const kArmR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.0, 0.28), skinMat);
+kArmL.position.set(-0.8, 1.9, 0); kArmL.rotation.z = 0.5;
+kArmR.position.set(0.8, 1.9, 0); kArmR.rotation.z = -0.5;
+
+goalkeeper.add(kBody, kHead, kArmL, kArmR);
+goalkeeper.position.set(0, 0, -47); // Posicionado na linha do gol
+scene.add(goalkeeper);
+// --- MULTIDÃO ESTILO JOGADOR ---
+const crowdGroup = new THREE.Group();
+
+function criarTorcedor(x, z) {
+    const fan = new THREE.Group();
+    const fanSkin = new THREE.MeshPhongMaterial({ color: 0xffdbac });
+    const fanShirt = new THREE.MeshPhongMaterial({ 
+        color: [0xff0000, 0x0000ff, 0xffffff, 0xffff00][Math.floor(Math.random() * 4)] 
+    });
+
+    // Versão simplificada do seu jogador
+    const fBody = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.0, 0.4), fanShirt);
+    fBody.position.y = 1.1;
+    const fHead = new THREE.Mesh(new THREE.SphereGeometry(0.3), fanSkin);
+    fHead.position.y = 1.9;
+    
+    // Braços levantados (comemorando)
+    const fArmL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.2), fanSkin);
+    const fArmR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.2), fanSkin);
+    fArmL.position.set(-0.5, 1.5, 0); fArmL.rotation.z = 0.8;
+    fArmR.position.set(0.5, 1.5, 0); fArmR.rotation.z = -0.8;
+
+    fan.add(fBody, fHead, fArmL, fArmR);
+    fan.position.set(x, 0, z);
+    crowdGroup.add(fan);
+}
+
+// Gerar torcedores nas laterais
+for (let i = -45; i < 45; i += 4) {
+    criarTorcedor(-33, i); // Fileira esquerda
+    criarTorcedor(33, i);  // Fileira direita
+}
+scene.add(crowdGroup);
+
+        // Bola
+        const ball = new THREE.Mesh(
+            new THREE.SphereGeometry(0.45, 32, 32),
+            new THREE.MeshPhongMaterial({ color: 0xffffff, shininess: 100 })
+        );
+        ball.position.set(0, 0.45, 5);
+        ball.castShadow = true;
+        scene.add(ball);
+
+        let ballVel = new THREE.Vector3();
+        let score = 0;
+        let isCelebrating = false;
+
+        // Controles (mesmo de antes)
+        let moveInput = { x: 0, z: 0 };
+        const knob = document.getElementById('joystick-knob');
+        const joystickContainer = document.getElementById('joystick-container');
+        let isDragging = false;
+
+        joystickContainer.addEventListener('pointerdown', (e) => { isDragging = true; updateJoystick(e); });
+        window.addEventListener('pointermove', (e) => { if (isDragging) updateJoystick(e); });
+        window.addEventListener('pointerup', () => {
+            isDragging = false;
+            moveInput = { x: 0, z: 0 };
+            knob.style.transform = `translate(0px, 0px)`;
+        });
+
+        function updateJoystick(e) {
+            const rect = joystickContainer.getBoundingClientRect();
+            const dx = e.clientX - (rect.left + 60);
+            const dy = e.clientY - (rect.top + 60);
+            const dist = Math.min(Math.hypot(dx, dy), 45);
+            const angle = Math.atan2(dy, dx);
+
+            moveInput.x = Math.cos(angle) * (dist / 45);
+            moveInput.z = Math.sin(angle) * (dist / 45);
+
+            knob.style.transform = `translate(${moveInput.x * 45}px, ${moveInput.z * 45}px)`;
+        }
+
+        // Chute
+        document.getElementById('kick-button').addEventListener('pointerdown', () => {
+            if (isCelebrating) return;
+            const dist = player.position.distanceTo(ball.position);
+            if (dist < 3) {
+                const direction = new THREE.Vector3(
+                    ball.position.x - player.position.x,
+                    0,
+                    ball.position.z - player.position.z - 3
+                ).normalize();
+                ballVel.copy(direction).multiplyScalar(1.4);
+                ballVel.y = 0.55;
+            }
+        });
+
+        // ====================== ANIMAÇÃO NATURAL ======================
+        function animate(time) {
+
+            requestAnimationFrame(animate);
+            const t = time * 0.003;   // velocidade geral da animação
+// Faz a torcida vibrar
+crowdGroup.children.forEach((fan, index) => {
+    // Eles pulam e balançam os braços levemente
+    fan.position.y = Math.sin(time * 0.004 + index) * 0.3;
+    fan.rotation.y = Math.sin(time * 0.002 + index) * 0.2;
+});
+
+            if (!isCelebrating) {
+                const isMoving = Math.abs(moveInput.x) > 0.05 || Math.abs(moveInput.z) > 0.05;
+
+                if (isMoving) {
+                    // Movimento do jogador
+                    player.position.x += moveInput.x * 0.22;
+                    player.position.z += moveInput.z * 0.22;
+
+                    player.position.x = Math.max(-28, Math.min(28, player.position.x));
+                    player.position.z = Math.max(-45, Math.min(45, player.position.z));
+
+                    player.rotation.y = Math.atan2(moveInput.x, moveInput.z);
+
+                    // === ANIMAÇÃO NATURAL DE CORRIDA ===
+                    const walkSpeed = 4.5;                    // quanto mais baixo = mais lento
+                    const legSwing = Math.sin(t * walkSpeed) * 0.9;
+                    const armSwing = Math.sin(t * walkSpeed) * 0.85;
+
+                    // Pernas (mais natural)
+                    lLeg.rotation.x = legSwing;
+                    rLeg.rotation.x = -legSwing;
+
+                    // Braços balançando no sentido oposto (muito mais realista)
+                    lArm.rotation.x = -armSwing;
+                    rArm.rotation.x = armSwing;
+
+                    // Leve inclinação do corpo ao correr
+                    body.rotation.x = Math.abs(legSwing) * 0.08;
+                } else {
+                    // Parado = pose relaxada
+                    lLeg.rotation.x = rLeg.rotation.x = 0;
+                    lArm.rotation.x = rArm.rotation.x = 0.2;   // braços levemente à frente
+                    body.rotation.x = 0;
+                }
+            } else {
+                // Celebração
+                player.rotation.y += 0.04;
+                lArm.rotation.x = Math.sin(t * 6) * 1.2;
+                rArm.rotation.x = -Math.sin(t * 6) * 1.2;
+            }
+            // --- LÓGICA DO GOLEIRO ---
+// Seguir a bola no eixo X (limitado à largura do gol)
+const keeperSpeed = 0.15;
+const targetX = Math.max(-5, Math.min(5, ball.position.x));
+goalkeeper.position.x += (targetX - goalkeeper.position.x) * keeperSpeed;
+
+// Verificar colisão com a bola (Rebote)
+const distToBall = goalkeeper.position.distanceTo(ball.position);
+if (distToBall < 1.8) {
+    // Rebate a bola para frente e para cima
+    ballVel.z = 0.8; // Empurra para longe do gol
+    ballVel.x = (ball.position.x - goalkeeper.position.x) * 0.5; // Desvia lateralmente
+    ballVel.y = 0.3; // Pequeno pulo na bola
+}
+
+            // Física da bola
+            ball.position.add(ballVel);// ===== BARREIRAS DO CAMPO =====
+const LIMIT_X = 29;  // laterais
+const LIMIT_Z = 49;  // fundo
+
+// ESQUERDA / DIREITA
+if (ball.position.x > LIMIT_X) {
+    ball.position.x = LIMIT_X;
+    ballVel.x *= -0.85;
+}
+
+if (ball.position.x < -LIMIT_X) {
+    ball.position.x = -LIMIT_X;
+    ballVel.x *= -0.85;
+}
+
+// FRENTE (onde fica você)
+if (ball.position.z > LIMIT_Z) {
+    ball.position.z = LIMIT_Z;
+    ballVel.z *= -0.85;// ===== SEGUNDO GOL (ATRÁS DO PLAYER) =====
+const goalBack = new THREE.Group();
+// ===== CASAS E PRÉDIOS =====
+
+// função casa
+function criarCasa(x, z) {
+    const casa = new THREE.Mesh(
+        new THREE.BoxGeometry(4, 3, 4),
+        new THREE.MeshPhongMaterial({ color: 0xb5651d })
+    );
+    casa.position.set(x, 1.5, z);
+    scene.add(casa);
+}
+
+// função prédio
+function criarPredio(x, z) {
+    const altura = Math.random() * 10 + 6;
+
+    const predio = new THREE.Mesh(
+        new THREE.BoxGeometry(5, altura, 5),
+        new THREE.MeshPhongMaterial({ color: 0x888888 })
+    );
+    predio.position.set(x, altura / 2, z);
+    scene.add(predio);
+}
+
+// adicionar atrás do gol (lado negativo)
+for (let i = -25; i <= 25; i += 6) {
+    if (Math.random() > 0.5) {
+        criarCasa(i, -60);
+    } else {
+        criarPredio(i, -60);
+    }
+}
+const post1b = new THREE.Mesh(new THREE.BoxGeometry(0.6, 5, 0.6), postMat);
+const post2b = new THREE.Mesh(new THREE.BoxGeometry(0.6, 5, 0.6), postMat);
+const crossbarb = new THREE.Mesh(new THREE.BoxGeometry(11, 0.6, 0.6), postMat);
+
+post1b.position.set(-5.5, 2.5, 48.5);
+post2b.position.set(5.5, 2.5, 48.5);
+crossbarb.position.set(0, 5, 48.5);
+
+goalBack.add(post1b, post2b, crossbarb);
+scene.add(goalBack);
+}
+
+// FUNDO (gol)
+if (ball.position.z < -LIMIT_Z) {
+    ball.position.z = -LIMIT_Z;
+    ballVel.z *= -0.85;
+}
+            ballVel.multiplyScalar(0.96);
+            ballVel.y -= 0.028;
+
+            if (ball.position.y < 0.45) {
+                ball.position.y = 0.45;
+                ballVel.y = -ballVel.y * 0.35;
+                ballVel.x *= 0.82;
+                ballVel.z *= 0.82;
+            }
+
+            // Gol
+            if (ball.position.z < -47.5 && Math.abs(ball.position.x) < 5.5 && ball.position.y < 4.8) {
+                if (!isCelebrating) {
+                    score++;
+                    document.getElementById('score').innerText = score;
+                    document.getElementById('goal-msg').style.display = 'block';
+                    isCelebrating = true;
+
+                    setTimeout(() => {
+                        isCelebrating = false;
+                        document.getElementById('goal-msg').style.display = 'none';
+                        ball.position.set(0, 0.45, 5);
+                        ballVel.set(0,0,0);
+                        player.position.set(0, 0, 10);
+                    }, 2800);
+                }
+            }
+
+            // Câmera
+            camera.position.set(player.position.x * 0.6, 22, player.position.z + 19);
+            camera.lookAt(player.position.x, 3, player.position.z - 6);
+
+            renderer.render(scene, camera);
+        }
+
+        animate(0);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
